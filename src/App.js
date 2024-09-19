@@ -15,6 +15,7 @@ import { createTheme, styled, ThemeProvider } from '@mui/material/styles';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import firebase from 'firebase/compat/app';
+import 'firebase/compat/auth';
 import { useEffect, useState } from "react";
 import './App.css';
 import BasicTable from './components/BasicTable';
@@ -22,6 +23,7 @@ import EntryModal from './components/EntryModal';
 import { mainListItems } from './components/listItems';
 import { SignInScreen } from './utils/READONLY_firebase';
 import { emptyEntry, subscribeToEntries } from './utils/mutations';
+import StyledFirebaseAuth from './components/StyledFirebaseAuth.tsx';
 
 // MUI styling constants
 
@@ -82,49 +84,72 @@ const mdTheme = createTheme({
   },
 });
 
-// App.js is the homepage and handles top-level functions like user auth.
+// FirebaseUI configuration
+const uiConfig = {
+  signInFlow: 'popup',
+  signInOptions: [
+    firebase.auth.GoogleAuthProvider.PROVIDER_ID,
+    firebase.auth.EmailAuthProvider.PROVIDER_ID,
+  ],
+  callbacks: {
+    signInSuccessWithAuthResult: (authResult) => {
+      const email = authResult.user.email;
+      firebase.auth().fetchSignInMethodsForEmail(email).then((methods) => {
+        if (methods.length > 0) {
+          alert('This email already has an account. Please log in.');
+        } else {
+          // No account exists, proceed with account creation or other actions
+          console.log("Account created successfully");
+        }
+      }).catch((error) => {
+        console.error('Error fetching sign-in methods:', error);
+      });
+      return false;  // Avoid redirects after sign-in
+    },
+    signInFailure: (error) => {
+      if (error.code === 'auth/email-already-in-use') {
+        alert("Email already in use. Try logging in instead.");
+      }
+    },
+  },
+};
 
+
+// Main App component
 export default function App() {
 
-  // User authentication functionality. Would not recommend changing.
+  // User authentication functionality
+  const [isSignedIn, setIsSignedIn] = useState(false); // Local signed-in state
+  const [currentUser, setCurrentUser] = useState(null); // Local user info
 
-  const [isSignedIn, setIsSignedIn] = useState(false); // Local signed-in state.
-  const [currentUser, setcurrentUser] = useState(null); // Local user info
-
-  // Listen to the Firebase Auth state and set the local state.
+  // Listen to the Firebase Auth state and set the local state
   useEffect(() => {
     const unregisterAuthObserver = firebase.auth().onAuthStateChanged(user => {
       setIsSignedIn(!!user);
-      if (!!user) {
-        setcurrentUser(user);
+      if (user) {
+        setCurrentUser(user);
       }
     });
-    return () => unregisterAuthObserver(); // Make sure we un-register Firebase observers when the component unmounts.
+    return () => unregisterAuthObserver(); // Un-register Firebase observers when component unmounts
   }, []);
 
   // Navbar drawer functionality
-
   const [open, setOpen] = useState(true);
   const toggleDrawer = () => {
-    setOpen(open);
+    setOpen(prevOpen => !prevOpen);
   };
 
-  // Data fetching from DB. Would not recommend changing.
-  // Reference video for snapshot functionality https://www.youtube.com/watch?v=ig91zc-ERSE
-
+  // Data fetching from DB
   const [entries, setEntries] = useState([]);
 
   useEffect(() => {
     if (!currentUser) {
-       return;
+      return;
     }
-
     subscribeToEntries(currentUser.uid, setEntries);
- 
- }, [currentUser]);
+  }, [currentUser]);
 
-  // Main content of homescreen. This is displayed conditionally from user auth status
-
+  // Main content of homepage
   function mainContent() {
     if (isSignedIn) {
       return (
@@ -138,67 +163,71 @@ export default function App() {
             <BasicTable entries={entries} />
           </Grid>
         </Grid>
-      )
-    } else return (
-      <SignInScreen></SignInScreen>
-    )
-  }
+      );
+    } else {
+      return (
+        <div>
+          <h1>Sign in</h1>
+          <StyledFirebaseAuth uiConfig={uiConfig} firebaseAuth={firebase.auth()} />
+        </div>
+      );
+    }
+  }  
 
-  const MenuBar = () => {
-    return(
+  // MenuBar component
+  const MenuBar = () => (
     <AppBar position="absolute" open={open}>
-          <Toolbar
-            sx={{
-              pr: '24px', // keep right padding when drawer closed
-            }}
-          >
-            <IconButton
-              edge="start"
-              color="inherit"
-              aria-label="open drawer"
-              onClick={toggleDrawer}
-              sx={{
-                marginRight: '36px',
-                ...(open && { display: 'none' }),
-              }}
-            >
-              <MenuIcon />
-            </IconButton>
-            <Typography
-              component="h1"
-              variant="h6"
-              color="inherit"
-              noWrap
-              sx={{ flexGrow: 1 }}
-            >
-              Speaker Outreach
-            </Typography>
-            <Typography
-              component="h1"
-              variant="body1"
-              color="inherit"
-              noWrap
-              sx={{
-                marginRight: '20px',
-                display: isSignedIn ? 'inline' : 'none'
-              }}
-            >
-              Signed in as {firebase.auth().currentUser?.displayName}
-            </Typography>
-            <Button variant="contained" size="small"
-              sx={{
-                marginTop: '5px',
-                marginBottom: '5px',
-                display: isSignedIn ? 'inline' : 'none'
-              }}
-              onClick={() => firebase.auth().signOut()}
-            >
-              Log out
-            </Button>
-          </Toolbar>
-        </AppBar>
-    )
-  }
+      <Toolbar
+        sx={{
+          pr: '24px', // keep right padding when drawer closed
+        }}
+      >
+        <IconButton
+          edge="start"
+          color="inherit"
+          aria-label="open drawer"
+          onClick={toggleDrawer}
+          sx={{
+            marginRight: '36px',
+            ...(open && { display: 'none' }),
+          }}
+        >
+          <MenuIcon />
+        </IconButton>
+        <Typography
+          component="h1"
+          variant="h6"
+          color="inherit"
+          noWrap
+          sx={{ flexGrow: 1 }}
+        >
+          Speaker Outreach
+        </Typography>
+        <Typography
+          component="h1"
+          variant="body1"
+          color="inherit"
+          noWrap
+          sx={{
+            marginRight: '20px',
+            display: isSignedIn ? 'inline' : 'none'
+          }}
+        >
+          Signed in as {firebase.auth().currentUser?.displayName}
+        </Typography>
+        <Button variant="contained" size="small"
+          sx={{
+            marginTop: '5px',
+            marginBottom: '5px',
+            display: isSignedIn ? 'inline' : 'none'
+          }}
+          onClick={() => firebase.auth().signOut()}
+        >
+          Log out
+        </Button>
+      </Toolbar>
+    </AppBar>
+  );
 
   return (
     <ThemeProvider theme={mdTheme}>
