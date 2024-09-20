@@ -15,18 +15,15 @@ import { createTheme, styled, ThemeProvider } from '@mui/material/styles';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import firebase from 'firebase/compat/app';
-import 'firebase/compat/auth';
 import { useEffect, useState } from "react";
 import './App.css';
 import BasicTable from './components/BasicTable';
 import EntryModal from './components/EntryModal';
 import { mainListItems } from './components/listItems';
-import { SignInScreen } from './utils/READONLY_firebase';
-import { emptyEntry, subscribeToEntries } from './utils/mutations';
+import { emptyEntry } from './utils/mutations';
 import StyledFirebaseAuth from './components/StyledFirebaseAuth.tsx';
 
 // MUI styling constants
-
 const drawerWidth = 240;
 
 const AppBar = styled(MuiAppBar, {
@@ -92,64 +89,55 @@ const uiConfig = {
     firebase.auth.EmailAuthProvider.PROVIDER_ID,
   ],
   callbacks: {
-    signInSuccessWithAuthResult: (authResult) => {
-      const email = authResult.user.email;
-      firebase.auth().fetchSignInMethodsForEmail(email).then((methods) => {
-        if (methods.length > 0) {
+    signInSuccessWithAuthResult: async (authResult) => {
+      const user = authResult.user;
+      try {
+        const email = user.email;
+        const methods = await firebase.auth().fetchSignInMethodsForEmail(email);
+        
+        if (methods.length > 0 && !methods.includes('password')) {
+          // If account already exists, prevent account creation
           alert('This email already has an account. Please log in.');
+          await firebase.auth().signOut();
         } else {
-          // No account exists, proceed with account creation or other actions
-          console.log("Account created successfully");
+          console.log("Signed in successfully.");
         }
-      }).catch((error) => {
+      } catch (error) {
         console.error('Error fetching sign-in methods:', error);
-      });
-      return false;  // Avoid redirects after sign-in
+      }
+      return false; // Prevent redirect after sign-in
     },
     signInFailure: (error) => {
       if (error.code === 'auth/email-already-in-use') {
-        alert("Email already in use. Try logging in instead.");
+        alert("This email is already in use. Please log in.");
+        return firebase.auth().signOut();
       }
+      return Promise.resolve();
     },
   },
 };
 
-
 // Main App component
 export default function App() {
-
-  // User authentication functionality
   const [isSignedIn, setIsSignedIn] = useState(false); // Local signed-in state
   const [currentUser, setCurrentUser] = useState(null); // Local user info
 
-  // Listen to the Firebase Auth state and set the local state
+  // Listen to Firebase Auth state and set the local state
   useEffect(() => {
     const unregisterAuthObserver = firebase.auth().onAuthStateChanged(user => {
       setIsSignedIn(!!user);
-      if (user) {
-        setCurrentUser(user);
-      }
+      setCurrentUser(user || null);
     });
-    return () => unregisterAuthObserver(); // Un-register Firebase observers when component unmounts
+    return () => unregisterAuthObserver(); // Clean up Firebase observer when component unmounts
   }, []);
 
-  // Navbar drawer functionality
+  // Drawer toggle state
   const [open, setOpen] = useState(true);
   const toggleDrawer = () => {
-    setOpen(prevOpen => !prevOpen);
+    setOpen(!open);
   };
 
-  // Data fetching from DB
-  const [entries, setEntries] = useState([]);
-
-  useEffect(() => {
-    if (!currentUser) {
-      return;
-    }
-    subscribeToEntries(currentUser.uid, setEntries);
-  }, [currentUser]);
-
-  // Main content of homepage
+  // Main content rendering based on authentication
   function mainContent() {
     if (isSignedIn) {
       return (
@@ -160,7 +148,7 @@ export default function App() {
             </Stack>
           </Grid>
           <Grid item xs={12}>
-            <BasicTable entries={entries} />
+            <BasicTable entries={[]} />
           </Grid>
         </Grid>
       );
@@ -172,25 +160,18 @@ export default function App() {
         </div>
       );
     }
-  }  
+  }
 
   // MenuBar component
   const MenuBar = () => (
     <AppBar position="absolute" open={open}>
-      <Toolbar
-        sx={{
-          pr: '24px', // keep right padding when drawer closed
-        }}
-      >
+      <Toolbar sx={{ pr: '24px' }}>
         <IconButton
           edge="start"
           color="inherit"
           aria-label="open drawer"
           onClick={toggleDrawer}
-          sx={{
-            marginRight: '36px',
-            ...(open && { display: 'none' }),
-          }}
+          sx={{ marginRight: '36px', ...(open && { display: 'none' }) }}
         >
           <MenuIcon />
         </IconButton>
@@ -203,28 +184,20 @@ export default function App() {
         >
           Speaker Outreach
         </Typography>
-        <Typography
-          component="h1"
-          variant="body1"
-          color="inherit"
-          noWrap
-          sx={{
-            marginRight: '20px',
-            display: isSignedIn ? 'inline' : 'none'
-          }}
-        >
-          Signed in as {firebase.auth().currentUser?.displayName}
-        </Typography>
-        <Button variant="contained" size="small"
-          sx={{
-            marginTop: '5px',
-            marginBottom: '5px',
-            display: isSignedIn ? 'inline' : 'none'
-          }}
-          onClick={() => firebase.auth().signOut()}
-        >
-          Log out
-        </Button>
+        {isSignedIn && (
+          <>
+            <Typography component="h1" variant="body1" color="inherit" noWrap>
+              Signed in as {currentUser?.displayName}
+            </Typography>
+            <Button
+              variant="contained"
+              size="small"
+              onClick={() => firebase.auth().signOut()}
+            >
+              Log out
+            </Button>
+          </>
+        )}
       </Toolbar>
     </AppBar>
   );
@@ -248,9 +221,7 @@ export default function App() {
             </IconButton>
           </Toolbar>
           <Divider />
-          <List component="nav">
-            {mainListItems}
-          </List>
+          <List component="nav">{mainListItems}</List>
         </Drawer>
         <Box
           component="main"
